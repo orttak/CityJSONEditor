@@ -69,14 +69,14 @@ class Material:
     def setTexture(self):
         
         if not hasattr(self, "appearances"):
-            self.setColor()
-            return
+            raise RuntimeError(f"Appearance section missing for object '{self.objectID}' while importing textures.")
         if 'texture' not in self.geometry:
-            self.setColor()
-            return
+            raise RuntimeError(f"Texture entry missing in geometry for object '{self.objectID}'.")
         
         # list of all themes used in the object
         themeNames = list(self.geometry['texture'].keys())
+        if not themeNames:
+            raise RuntimeError(f"No texture themes found for object '{self.objectID}'.")
         # name of the first theme, as this is the default for now
         themeName = themeNames[0]
         # stacked array of texture references
@@ -115,7 +115,7 @@ class Material:
             self.material.node_tree.links.new(texture_node.outputs[0], principled_BSDF.inputs[0])
         
         else: 
-            self.setColor()
+            raise RuntimeError(f"Texture reference is None for surface {self.surfaceIndex} in object '{self.objectID}'.")
 
     def setColor(self):
         ft = FeatureTypes()
@@ -153,10 +153,7 @@ class Material:
         self.createMaterial()
         # use the corresponding function for the objects appearance according to the presence of a texture
         if self.textureSetting is True:
-            try:
-                self.setTexture()
-            except Exception:
-                self.setColor()
+            self.setTexture()
         else:
             self.setColor()
         # assign the materials to the individual faces

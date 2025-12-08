@@ -103,12 +103,12 @@ class ExportProcess:
        
         for mesh in meshes:
             if not mesh.uv_layers:
-                continue
+                raise RuntimeError(f"Mesh '{mesh.name}' has textures enabled for export but no UV layers.")
             uv_layer = mesh.uv_layers[0].data
             for polyIndex, poly  in enumerate(mesh.polygons):
                 semantic = poly.material_index
                 if semantic >= len(mesh.materials):
-                    continue
+                    raise RuntimeError(f"Polygon {polyIndex} in mesh '{mesh.name}' references missing material index {semantic}.")
                 loopTotal = poly.loop_total
                 if len(mesh.materials[semantic].node_tree.nodes) > 2:
                     for loop_index in range(poly.loop_start, poly.loop_start + loopTotal):

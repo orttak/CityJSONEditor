@@ -20,10 +20,10 @@ ADDON_ID = (__package__ or __name__).split(".")[0]
 
 HELP_TEXT = [
     "1) Set the workspace folder (mounted as /input in docker).",
-    "2) \"Fetch from CityDB\" exports low-LoD (overview) CityJSON and loads it.",
+    "2) \"Fetch from CityDB\" exports low-LoD (overview) CityJSON, validates with cjio, and loads it.",
     "3) Select a building and run \"Load high LoD for selection\" to fetch detailed geometry.",
     "4) Edit using CityJSONEditor tools.",
-    "5) \"Export + Push\" writes CityJSON and imports it into CityDB.",
+    "5) \"Export CityJSON\" writes and validates the file; \"Push to DB\" sends a validated file into CityDB.",
     "Use \"Load defaults\" / \"Save as defaults\" to manage presets.",
 ]
 
@@ -205,49 +205,24 @@ def _normalize_cityjson_lods(data: dict, default_lod: float | None = 0.0) -> boo
     return changed
 
 
-def _wrap_multisurface_to_solid(data: dict) -> bool:
+def _check_semantics(data: dict) -> tuple[bool, str]:
     """
-    Convert MultiSurface geometries to Solid with a single shell so CityJSONEditor can import them.
+    Ensure semantics arrays exist and are consistent; do not auto-fix so issues surface to the user.
     """
-    changed = False
     cityobjects = data.get("CityObjects", {}) or {}
-    for obj in cityobjects.values():
-        geoms = obj.get("geometry") or []
-        for geom in geoms:
-            if geom.get("type") == "MultiSurface" and "boundaries" in geom:
-                boundaries = geom.get("boundaries") or []
-                geom["type"] = "Solid"
-                geom["boundaries"] = [boundaries]
-                changed = True
-    return changed
-
-
-def _sanitize_semantics(data: dict) -> bool:
-    """
-    Ensure semantics exist; preserve existing semantics when present.
-    """
-    changed = False
-    cityobjects = data.get("CityObjects", {}) or {}
-    for obj in cityobjects.values():
+    for co_id, obj in cityobjects.items():
         geoms = obj.get("geometry") or []
         for geom in geoms:
             semantics = geom.get("semantics")
-            if isinstance(semantics, dict):
-                values = semantics.get("values")
-                surfaces = semantics.get("surfaces")
-                if values and isinstance(values, list) and values and surfaces:
-                    continue
-            boundaries = geom.get("boundaries") or []
-            face_count = 0
-            if geom.get("type") == "Solid":
-                for shell in boundaries:
-                    face_count += len(shell)
-            else:
-                face_count = len(boundaries)
-            face_count = face_count or 1
-            geom["semantics"] = {"surfaces": [{"type": "WallSurface"}], "values": [[0] * face_count]}
-            changed = True
-    return changed
+            if not isinstance(semantics, dict):
+                return False, f"Missing semantics for geometry in CityObject '{co_id}'."
+            values = semantics.get("values")
+            surfaces = semantics.get("surfaces")
+            if not values or not isinstance(values, list) or not values[0]:
+                return False, f"Semantics values missing/empty for CityObject '{co_id}'."
+            if not surfaces:
+                return False, f"Semantics surfaces missing for CityObject '{co_id}'."
+    return True, ""
 
 
 def _ensure_semantic_materials(context) -> None:
@@ -438,10 +413,9 @@ def _prepare_cityjson_for_import(local_file: Path, settings) -> tuple[bool, str,
     changed = False
     if _normalize_cityjson_lods(data):
         changed = True
-    if settings.overview_wrap_multisurface and _wrap_multisurface_to_solid(data):
-        changed = True
-    if _sanitize_semantics(data):
-        changed = True
+    ok, sem_msg = _check_semantics(data)
+    if not ok:
+        return False, sem_msg, None
     if not settings.import_textures and _strip_textures(data):
         changed = True
     # Ensure every geometry has a texture key, even if empty
@@ -549,11 +523,6 @@ class CityDBBridgePreferences(AddonPreferences):
         description="LoDs used when fetching a selected building",
         default="2,3",
     )
-    overview_wrap_multisurface: BoolProperty(
-        name="Wrap MultiSurface as Solid (overview)",
-        description="Convert MultiSurface geometries to a thin Solid for LoD0/overview fetch so CityJSONEditor can import them",
-        default=False,
-    )
     high_sql_template: StringProperty(
         name="High-LoD SQL filter",
         description="SQL subquery returning feature IDs; {gmlid} is replaced with the selected object's gmlid/objectid",
@@ -605,7 +574,6 @@ class CityDBBridgePreferences(AddonPreferences):
         col.prop(self, "db_password")
         col.prop(self, "low_lods")
         col.prop(self, "high_lods")
-        col.prop(self, "overview_wrap_multisurface")
         col.prop(self, "high_sql_template")
         col.prop(self, "replace_on_high")
         col.prop(self, "fallback_on_empty")
@@ -674,10 +642,6 @@ class CityDBBridgeSettings(PropertyGroup):
         name="High LoDs",
         default="2,3",
     )
-    overview_wrap_multisurface: BoolProperty(
-        name="Wrap MultiSurface as Solid (overview)",
-        default=False,
-    )
     high_sql_template: StringProperty(
         name="High-LoD SQL filter",
         description="SQL subquery returning feature IDs; {gmlid} is replaced with the selected object's gmlid/objectid",
@@ -743,7 +707,6 @@ def _sync_from_prefs(settings: CityDBBridgeSettings, prefs: CityDBBridgePreferen
     settings.docker_image = prefs.docker_image
     settings.low_lods = prefs.low_lods
     settings.high_lods = prefs.high_lods
-    settings.overview_wrap_multisurface = prefs.overview_wrap_multisurface
     settings.high_sql_template = prefs.high_sql_template
     settings.replace_on_high = prefs.replace_on_high
     settings.fallback_on_empty = prefs.fallback_on_empty
@@ -796,7 +759,6 @@ class CITYDB_OT_SaveDefaults(Operator):
         prefs.docker_image = settings.docker_image
         prefs.low_lods = settings.low_lods
         prefs.high_lods = settings.high_lods
-        prefs.overview_wrap_multisurface = settings.overview_wrap_multisurface
         prefs.high_sql_template = settings.high_sql_template
         prefs.replace_on_high = settings.replace_on_high
         prefs.fallback_on_empty = settings.fallback_on_empty
@@ -1001,6 +963,13 @@ class CITYDB_OT_FetchFromDB(Operator):
             if wm:
                 wm.progress_end()
             return {"CANCELLED"}
+        val_ok, val_msg = _validate_with_cjio(local_file)
+        if not val_ok:
+            settings.last_message = f"cjio validation failed: {val_msg}"
+            self.report({"ERROR"}, settings.last_message)
+            if wm:
+                wm.progress_end()
+            return {"CANCELLED"}
 
         if settings.fallback_on_empty and (not data.get("CityObjects")):
             fallback_lods = settings.fallback_lods_low.strip()
@@ -1023,6 +992,13 @@ class CITYDB_OT_FetchFromDB(Operator):
                     settings.last_message = (
                         f"Overview fetch returned empty even after fallback LoDs ({fallback_lods}). {msg}"
                     )
+                    self.report({"ERROR"}, settings.last_message)
+                    if wm:
+                        wm.progress_end()
+                    return {"CANCELLED"}
+                val_ok, val_msg = _validate_with_cjio(local_file)
+                if not val_ok:
+                    settings.last_message = f"cjio validation failed after fallback: {val_msg}"
                     self.report({"ERROR"}, settings.last_message)
                     if wm:
                         wm.progress_end()
@@ -1095,6 +1071,11 @@ class CITYDB_OT_FetchHighForSelection(Operator):
             settings.last_message = f"CityJSON file check failed: {msg}"
             self.report({"ERROR"}, settings.last_message)
             return {"CANCELLED"}
+        val_ok, val_msg = _validate_with_cjio(local_file)
+        if not val_ok:
+            settings.last_message = f"cjio validation failed: {val_msg}"
+            self.report({"ERROR"}, settings.last_message)
+            return {"CANCELLED"}
 
         if settings.replace_on_high:
             for obj in list(context.selected_objects):
@@ -1115,10 +1096,10 @@ class CITYDB_OT_FetchHighForSelection(Operator):
         return {"FINISHED"}
 
 
-class CITYDB_OT_ExportToDB(Operator):
-    bl_idname = "citydb_bridge.export"
-    bl_label = "Export + Push"
-    bl_description = "Export CityJSON with CityJSONEditor and import it into CityDB via docker"
+class CITYDB_OT_ExportToFile(Operator):
+    bl_idname = "citydb_bridge.export_file"
+    bl_label = "Export CityJSON"
+    bl_description = "Export CityJSON with CityJSONEditor and validate it with cjio (no DB push)"
 
     def execute(self, context):
         settings = context.scene.citydb_bridge_settings
@@ -1158,6 +1139,39 @@ class CITYDB_OT_ExportToDB(Operator):
             settings.last_message = f"cjio validation failed: {vmsg}"
             self.report({"ERROR"}, settings.last_message)
             return {"CANCELLED"}
+
+        settings.last_message = f"Exported and validated CityJSON: {paths['export_file']}"
+        self.report({"INFO"}, settings.last_message)
+        return {"FINISHED"}
+
+
+class CITYDB_OT_PushToDB(Operator):
+    bl_idname = "citydb_bridge.push_to_db"
+    bl_label = "Push to DB"
+    bl_description = "Import an existing validated CityJSON file into CityDB via docker"
+
+    def execute(self, context):
+        settings = context.scene.citydb_bridge_settings
+        missing = _validate_settings(settings)
+        if missing:
+            self.report({"ERROR"}, f"Missing required settings: {missing}")
+            return {"CANCELLED"}
+
+        paths = _build_paths(settings)
+        export_file = paths["export_file"]
+        if not export_file.exists():
+            msg = f"Export file not found: {export_file}"
+            self.report({"ERROR"}, msg)
+            return {"CANCELLED"}
+
+        ok, vmsg = _validate_with_cjio(export_file)
+        if not ok:
+            settings.last_message = f"cjio validation failed: {vmsg}"
+            self.report({"ERROR"}, settings.last_message)
+            return {"CANCELLED"}
+
+        mount = f"{_normalize_path_for_docker(paths['root'])}:/input"
+        source_in_container = f"/input/{settings.export_subdir}/{settings.export_filename}"
 
         cmd = [
             "docker",
@@ -1201,7 +1215,36 @@ class CITYDB_OT_ExportToDB(Operator):
             self.report({"ERROR"}, settings.last_message)
             return {"CANCELLED"}
 
-        settings.last_message = f"Pushed {paths['export_file']} into CityDB."
+        settings.last_message = f"Pushed {export_file} into CityDB."
+        self.report({"INFO"}, settings.last_message)
+        return {"FINISHED"}
+
+
+class CITYDB_OT_ValidateFile(Operator):
+    bl_idname = "citydb_bridge.validate_file"
+    bl_label = "Validate CityJSON (cjio)"
+    bl_description = "Validate a CityJSON file with cjio"
+
+    filepath: StringProperty(
+        name="CityJSON file",
+        description="Path to CityJSON file to validate",
+        subtype="FILE_PATH",
+        default="",
+    )
+
+    def execute(self, context):
+        settings = context.scene.citydb_bridge_settings
+        target = Path(self.filepath) if self.filepath else _build_paths(settings)["import_file"]
+        if not target.exists():
+            msg = f"File not found: {target}"
+            self.report({"ERROR"}, msg)
+            return {"CANCELLED"}
+        ok, vmsg = _validate_with_cjio(target)
+        if not ok:
+            settings.last_message = f"cjio validation failed: {vmsg}"
+            self.report({"ERROR"}, settings.last_message)
+            return {"CANCELLED"}
+        settings.last_message = f"cjio validation passed: {target}"
         self.report({"INFO"}, settings.last_message)
         return {"FINISHED"}
 
@@ -1286,7 +1329,10 @@ class CITYDB_PT_BridgePanel(Panel):
         op_row = box.row(align=True)
         op_row.operator(CITYDB_OT_FetchFromDB.bl_idname, icon="IMPORT")
         op_row.operator(CITYDB_OT_FetchHighForSelection.bl_idname, icon="ZOOM_IN")
-        op_row.operator(CITYDB_OT_ExportToDB.bl_idname, icon="EXPORT")
+        op_row.operator(CITYDB_OT_ValidateFile.bl_idname, icon="CHECKMARK")
+        export_row = box.row(align=True)
+        export_row.operator(CITYDB_OT_ExportToFile.bl_idname, icon="EXPORT")
+        export_row.operator(CITYDB_OT_PushToDB.bl_idname, icon="FILE_TICK")
         box.operator(CITYDB_OT_ExportGMLValidate.bl_idname, icon="FILE_CACHE")
 
         help_box = layout.box()
@@ -1308,7 +1354,9 @@ class CITYDB_MT_TopMenu(bpy.types.Menu):
         layout = self.layout
         layout.operator(CITYDB_OT_FetchFromDB.bl_idname, icon="IMPORT")
         layout.operator(CITYDB_OT_FetchHighForSelection.bl_idname, icon="ZOOM_IN")
-        layout.operator(CITYDB_OT_ExportToDB.bl_idname, icon="EXPORT")
+        layout.operator(CITYDB_OT_ExportToFile.bl_idname, icon="EXPORT")
+        layout.operator(CITYDB_OT_PushToDB.bl_idname, icon="FILE_TICK")
+        layout.operator(CITYDB_OT_ValidateFile.bl_idname, icon="CHECKMARK")
         layout.separator()
         layout.operator("preferences.addon_show", text="Addon preferences").module = ADDON_ID
 
@@ -1334,7 +1382,9 @@ classes = (
     CITYDB_OT_SaveDefaults,
     CITYDB_OT_FetchFromDB,
     CITYDB_OT_FetchHighForSelection,
-    CITYDB_OT_ExportToDB,
+    CITYDB_OT_ExportToFile,
+    CITYDB_OT_PushToDB,
+    CITYDB_OT_ValidateFile,
     CITYDB_OT_ExportGMLValidate,
     CITYDB_PT_BridgePanel,
     CITYDB_MT_TopMenu,

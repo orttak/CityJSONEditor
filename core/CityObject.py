@@ -87,17 +87,18 @@ class ImportCityObject:
                 face_count += len(shell)
         else:
             face_count = len(boundaries)
-        if isinstance(semantics, dict):
-            values = semantics.get("values")
-            surfaces = semantics.get("surfaces")
-            if values and isinstance(values, list) and values and surfaces:
-                first = values[0]
-                if isinstance(first, list):
-                    if face_count == 0 or len(first) == face_count:
-                        return semantics
-        if face_count == 0:
-            return {"surfaces": [{"type": "WallSurface"}], "values": [[]]}
-        return {"surfaces": [{"type": "WallSurface"}], "values": [[0 for _ in range(face_count)]]}
+        if not isinstance(semantics, dict):
+            raise ValueError(f"Semantics missing for object '{self.objectID}'.")
+        values = semantics.get("values")
+        surfaces = semantics.get("surfaces")
+        if not values or not isinstance(values, list) or not values[0]:
+            raise ValueError(f"Semantics values missing for object '{self.objectID}'.")
+        if not surfaces:
+            raise ValueError(f"Semantics surfaces missing for object '{self.objectID}'.")
+        first = values[0]
+        if face_count and len(first) != face_count:
+            raise ValueError(f"Semantic values count ({len(first)}) does not match face count ({face_count}) for object '{self.objectID}'.")
+        return semantics
 
 
     def createMaterials(self, newObject):
@@ -108,7 +109,7 @@ class ImportCityObject:
             values = semantics.get("values", [[]])
             surfaces = semantics.get("surfaces", [])
             if not values or not isinstance(values, list) or not values[0]:
-                continue
+                raise ValueError(f"Semantics values missing for object '{self.objectID}'.")
             face_values = values[0]
             l = len(face_values)
             self.printProgressBar(0, l, prefix = 'Materials:', suffix = 'Complete', length = 50)
@@ -123,22 +124,22 @@ class ImportCityObject:
                 # Update Progress Bar
                 self.printProgressBar(surfaceIndex+1 , l, prefix = 'Materials:', suffix = 'Complete', length = 50, time='t/m: %.4f sec' % (time_needed))
             if not l:
-                print("No semantic values found for geometry; using defaults.")
+                raise ValueError(f"No semantic values found for object '{self.objectID}'.")
             
     def uvMapping(self, object, data, geom):
 
         texture_block = geom.get("texture") or {}
         if not texture_block or "appearance" not in data:
-            return
+            raise RuntimeError(f"Texture block/appearance missing for object '{self.objectID}'.")
         themeNames = list(texture_block.keys())
         if not themeNames:
-            return
+            raise RuntimeError(f"No texture themes found for object '{self.objectID}'.")
         themeName = themeNames[0]
 
         # uv coordinates from json file
         uv_coords = (data.get('appearance') or {}).get('vertices-texture')
         if not uv_coords:
-            return
+            raise RuntimeError(f"Texture vertices missing for object '{self.objectID}'.")
         # all data from the json file
         mesh_data = object.data
         # create a new uv layer
@@ -150,7 +151,7 @@ class ImportCityObject:
         # iterate through faces
         values = (texture_block.get(themeName) or {}).get("values") or []
         if not values or not values[0]:
-            return
+            raise RuntimeError(f"Texture values missing for object '{self.objectID}'.")
         for face_index, face in enumerate(values[0]):
             # if the face has a texture (texture reference is not none)
             if face != [[None]]:

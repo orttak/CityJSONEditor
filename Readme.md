@@ -2,7 +2,7 @@
 
 A Blender add-on to import, edit and export new instances of [CityJSON](http://cityjson.org)-encoded 3D city models. All buildings' levels of detail (LoD), attributes and semantic surfaces are stored and can be accessed via Blender's graphical interface.
 
-**This fork adds an integrated CityDB bridge.** You can fetch/export CityJSON 2.0 files via the dockerised `citydb-tool` directly from the sidebar panel, validate with the bundled `cjio`, and reuse the original CityJSONEditor operators without installing a second add-on.
+**This fork adds an integrated CityDB bridge.** You can fetch/export CityJSON 2.0 files via the dockerised `citydb-tool` directly from the sidebar panel, validate with the bundled `cjio`, and reuse the original CityJSONEditor operators without installing a second add-on. Export and DB push are separate steps so you can validate (and fix) before sending to the database.
 
 This Addon is a fork of Konstantinos Mastorakis's Project `UP3DATE` which can be found [here](https://github.com/cityjson/Up3date). It was further developed and changed to serve the special purpose we had in mind for it. This purpose is to gain a tool for editing the 3D models of individual buildings for our 3D-City-Model, to add more detail and to manually texture buildings of special importance. 
 
