@@ -13,7 +13,7 @@ from .CityObject import ExportCityObject
 class ExportProcess:
     """Handles CityJSON export from Blender objects to file."""
 
-    def __init__(self, filepath, textureSetting, skip_failed_exports=True):
+    def __init__(self, filepath, textureSetting, skip_failed_exports=True, patch_baseline=False, export_changed_only=False):
         self.filepath = filepath
         self.jsonExport = None
         # True - export textures
@@ -21,7 +21,20 @@ class ExportProcess:
         self.textureSetting = textureSetting
         self.textureReferenceList = []
         self.skip_failed_exports = skip_failed_exports
+        self.patch_baseline = patch_baseline
+        self.export_changed_only = export_changed_only
         self.skipped_objects = []
+        self.baseline_data = self._load_baseline()
+
+    def _load_baseline(self):
+        txt = bpy.data.texts.get("CJE_BASELINE")
+        if not txt:
+            return None
+        try:
+            content = txt.as_string()
+            return json.loads(content)
+        except Exception:
+            return None
 
     def createJSONStruct(self):
         meta = {}
@@ -144,21 +157,38 @@ class ExportProcess:
                     continue
 
     def createCityObject(self):
-        vertexArray = []
-        blendObjects = bpy.data.objects
-        lastVertexIndex = 0
+        baseline_cityobjects = (self.baseline_data.get("CityObjects") or {}) if self.baseline_data else {}
+        baseline_vertices = (self.baseline_data.get("vertices") or []) if (self.baseline_data and self.export_changed_only) else []
+        vertexArray = list(baseline_vertices)
+        blendObjects = [obj for obj in bpy.data.objects if getattr(obj, "type", "") == "MESH"]
+        lastVertexIndex = len(vertexArray)
         scale = (self.jsonExport.get("transform") or {}).get("scale") or [0.001, 0.001, 0.001]
         if len(scale) != 3:
             scale = [0.001, 0.001, 0.001]
         scale = [s if s not in (None, 0) else 0.001 for s in scale]
+        grouped = copy.deepcopy(baseline_cityobjects) if self.export_changed_only and baseline_cityobjects else {}
+
+        objs = []
         for object in blendObjects:
-            print("Create Export-Object: "+object.name)
-            if "cityJSONType" not in object or "LOD" not in object:
-                print(f"[CityJSONEditor] Skipping '{object.name}': not a CityJSON object.")
+            if "cityJSONType" not in object:
                 continue
+            export_id = object.get("cj_source_id", object.name.split("__")[0])
+            objs.append((export_id, object))
+
+        dirty_ids = set()
+        if self.export_changed_only:
+            for export_id, obj in objs:
+                dirty = obj.get("cj_dirty", False) or export_id not in baseline_cityobjects
+                if dirty:
+                    dirty_ids.add(export_id)
+
+        for export_id, object in objs:
+            if self.export_changed_only and dirty_ids and export_id not in dirty_ids:
+                continue
+            print("Create Export-Object: "+object.name)
             try:
                 cityobj = ExportCityObject(object, lastVertexIndex, self.jsonExport, self.textureSetting, self.textureReferenceList)
-                cityobj.execute()
+                export_id, base_obj = cityobj.execute()
             except Exception as exc:
                 if self.skip_failed_exports:
                     print(f"[CityJSONEditor] Skipping export of '{object.name}': {exc}")
@@ -170,10 +200,17 @@ class ExportProcess:
                 vertex[1] = round(vertex[1]/scale[1])
                 vertex[2] = round(vertex[2]/scale[2])
                 vertexArray.append(vertex)
-            self.jsonExport["CityObjects"].update(cityobj.json)
             lastVertexIndex = cityobj.lastVertexIndex + 1
+            entry = grouped.get(export_id)
+            if entry is None or self.export_changed_only:
+                entry = {"type": base_obj["type"], "attributes": base_obj.get("attributes", {}), "geometry": []}
+                grouped[export_id] = entry
+            elif not entry.get("attributes"):
+                entry["attributes"] = base_obj.get("attributes", {})
+            entry["geometry"].extend(base_obj.get("geometry", []))
             print("lastVertexIndex "+str(lastVertexIndex))
         self.jsonExport['vertices'] = vertexArray
+        self.jsonExport['CityObjects'] = grouped
 
     def exportTextures(self, texture):
         fileSourceInfos = texture.filepath.split('\\')
@@ -220,6 +257,35 @@ class ExportProcess:
             round(max_vals[0],3), round(max_vals[1],3), round(max_vals[2],3)
         ]
 
+    def applyBaselinePatch(self):
+        if not self.patch_baseline:
+            return
+        baseline_txt = bpy.data.texts.get("CJE_BASELINE")
+        if not baseline_txt:
+            print("[CityJSONEditor] No baseline found; writing full export.")
+            return
+        try:
+            baseline_str = baseline_txt.as_string()
+        except Exception:
+            try:
+                baseline_str = baseline_txt.as_string()
+            except Exception:
+                baseline_str = None
+        if baseline_str is None:
+            print("[CityJSONEditor] Could not read baseline text; writing full export.")
+            return
+        try:
+            baseline = json.loads(baseline_str)
+        except Exception as exc:
+            print(f"[CityJSONEditor] Baseline JSON invalid: {exc}; writing full export.")
+            return
+        # preserve unknown keys from baseline while replacing core content
+        patched = baseline
+        for key in ["CityObjects", "vertices", "appearance", "transform", "metadata", "version", "type", "extensions"]:
+            if key in self.jsonExport:
+                patched[key] = self.jsonExport[key]
+        self.jsonExport = patched
+
     def execute(self):
         print('##########################')
         print('### STARTING EXPORT... ###')
@@ -233,6 +299,7 @@ class ExportProcess:
             self.getVerticesTexture()
         self.createCityObject()
         self.updateMetadataExtent()
+        self.applyBaselinePatch()
         self.writeData()
         if self.skipped_objects:
             print(f"[CityJSONEditor] Export skipped {len(self.skipped_objects)} object(s):")

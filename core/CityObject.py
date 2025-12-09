@@ -14,7 +14,7 @@ import copy
 class ImportCityObject:
     """Create Blender mesh/object instances from a CityJSON CityObject."""
 
-    def __init__(self, object, vertices, objID, textureSetting, rawObjectData, filepath):
+    def __init__(self, object, vertices, objID, textureSetting, rawObjectData, filepath, source_id=None, geom_index=0):
         # entire data of the object
         self.object = object
         # the object's mesh
@@ -23,6 +23,8 @@ class ImportCityObject:
         self.vertices = vertices
         # name/id of the object
         self.objectID = objID
+        self.source_id = source_id or objID.split("__")[0]
+        self.geom_index = geom_index
         # Import-setting which lets the user choose if textures present in the CityJSON should be imported
         # True - import textures
         # False - do not import textures
@@ -40,7 +42,7 @@ class ImportCityObject:
                 geom_lod = float(lod_raw) if lod_raw is not None else None
         except Exception:
             geom_lod = None
-        self.objectLOD = math.floor(geom_lod) if geom_lod is not None else 0
+        self.objectLOD = geom_lod if geom_lod is not None else 0
         # entire Data of the file
         self.rawObjectData = rawObjectData
         # File to be imported
@@ -97,6 +99,10 @@ class ImportCityObject:
             newObj["cj_attributes"] = copy.deepcopy(attrs)
         except Exception as exc:
             print(f"[CityJSONEditor] Warning: failed to store attributes for '{self.objectID}': {exc}")
+        newObj["cj_source_id"] = self.source_id
+        newObj["cj_geom_index"] = self.geom_index
+        newObj["cj_lod"] = self.objectLOD
+        newObj["cj_dirty"] = False
         # get the collection with the title "Collection"
         collection = bpy.data.collections.get("Collection")
         # add the new object to the collection
@@ -131,6 +137,13 @@ class ImportCityObject:
 
 
     def createMaterials(self, newObject):
+        mesh_data = newObject.data
+        try:
+            attr = mesh_data.attributes.get("cje_semantic_index")
+            if attr is None:
+                attr = mesh_data.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+        except Exception:
+            attr = None
         for geom in self.object.get('geometry', []):
             if self.object['type']=='GenericCityObject':
                 continue
@@ -156,12 +169,17 @@ class ImportCityObject:
                 surface_type = surfaces[surface_idx].get("type", "WallSurface") if surfaces else "WallSurface"
                 material = Material(surface_type, newObject, self.objectID, self.textureSetting, self.objectType, surfaceIndex, surface_idx, self.rawObjectData, self.filepath, geom )
                 material.execute()
+                stored_value = surfaceValue if surfaceValue is not None else -1
                 try:
-                    # keep track of the original semantics index per polygon for lossless export
-                    stored_value = surfaceValue if surfaceValue is not None else -1
-                    newObject.data.polygons[surfaceIndex]["cje_semantic_index"] = stored_value
+                    if attr:
+                        attr.data[surfaceIndex].value = stored_value
+                    else:
+                        newObject.data.polygons[surfaceIndex]["cje_semantic_index"] = stored_value
                 except Exception:
-                    pass
+                    try:
+                        newObject.data.polygons[surfaceIndex]["cje_semantic_index"] = stored_value
+                    except Exception:
+                        pass
                 time_needed = time.time() - time_mat
                 # Update Progress Bar
                 self.printProgressBar(surfaceIndex+1 , l, prefix = 'Materials:', suffix = 'Complete', length = 50, time='t/m: %.4f sec' % (time_needed))
@@ -237,6 +255,7 @@ class ExportCityObject:
         # all vertices of the current object
         self.vertices = []
         self.objID = self.object.name
+        self.export_id = self.object.get("cj_source_id", self.objID.split("__")[0])
         self.objType = self.object.get('cityJSONType', "Building")
         lod_raw = self.object.get('LOD', 0)
         try:
@@ -271,6 +290,10 @@ class ExportCityObject:
             self.attributes = copy.deepcopy(self.object.get("cj_attributes", {}))
         except Exception:
             self.attributes = {}
+        try:
+            self.geom_index = int(self.object.get("cj_geom_index", 0))
+        except Exception:
+            self.geom_index = 0
 
 
     def getVertices(self):
@@ -331,8 +354,9 @@ class ExportCityObject:
                 # close the loop
                 loop.append(exportIndex+self.lastVertexIndex)
             boundaries.append([loop])
-        maxVertex = max([max(j) for j in [max(i) for i in boundaries]])
-        self.lastVertexIndex = maxVertex
+        if boundaries:
+            maxVertex = max([max(j) for j in [max(i) for i in boundaries]])
+            self.lastVertexIndex = maxVertex
         geom_type = self.geometry_type if self.geometry_type in ("Solid", "MultiSurface") else "Solid"
         geom_entry = {
             "type": geom_type,
@@ -349,6 +373,11 @@ class ExportCityObject:
         self.semanticValues = []
         self.semanticSurfaces = [copy.deepcopy(s) for s in (self.source_semantics.get("surfaces") or [])] if isinstance(self.source_semantics, dict) else []
         surface_lookup = {self._surface_key(s): idx for idx, s in enumerate(self.semanticSurfaces)}
+        attr = None
+        try:
+            attr = mesh.attributes.get("cje_semantic_index")
+        except Exception:
+            attr = None
         # iterate through polygons
         for polyIndex, poly  in enumerate(mesh.polygons):
             # index of the material slot of the current polygon in blender
@@ -361,13 +390,19 @@ class ExportCityObject:
                 except Exception:
                     semanticSurface = semanticSurface
             stored_idx = None
-            try:
-                stored_idx = poly.get("cje_semantic_index")
-            except Exception:
+            if attr:
                 try:
-                    stored_idx = poly["cje_semantic_index"]
+                    stored_idx = attr.data[polyIndex].value
                 except Exception:
                     stored_idx = None
+            if stored_idx is None:
+                try:
+                    stored_idx = poly.get("cje_semantic_index")
+                except Exception:
+                    try:
+                        stored_idx = poly["cje_semantic_index"]
+                    except Exception:
+                        stored_idx = None
             surface_idx = None
             if stored_idx is not None:
                 if stored_idx == -1:
@@ -446,7 +481,7 @@ class ExportCityObject:
         if self.textureSetting and self.textureValues: 
             self.geometry[0].update({"texture" : {"default" : { "values" : [self.textureValues] }}})
         base["geometry"] = self.geometry
-        self.json = {self.objID : base}
+        self.json = {self.export_id : base}
         
     def execute(self):
         self.getVertices()
@@ -457,4 +492,5 @@ class ExportCityObject:
         else: 
             self.getSemantics()
         self.createJSON()
+        return self.export_id, self.json[self.export_id]
         

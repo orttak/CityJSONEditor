@@ -159,8 +159,8 @@ class ImportProcess:
         cityobjects = self.data.get('CityObjects') or {}
         for objID, object in cityobjects.items():
             print('Creating object: '+ objID)
-            filtered = object.copy()
-            geoms = filtered.get("geometry") or []
+            base_attrs = object.get("attributes") or {}
+            geoms = (object.get("geometry") or [])
             if self.lod_strategy == "HIGHEST" and geoms:
                 max_lod = max(float(g.get("lod", 0.0)) for g in geoms)
                 geoms = [g for g in geoms if float(g.get("lod", 0.0)) == max_lod]
@@ -172,12 +172,17 @@ class ImportProcess:
                     msg = "No geometry found for highest LoD"
                 print(f"Skipping CityObject '{objID}': {msg}.")
                 continue
-            filtered["geometry"] = geoms
-            cityobj = ImportCityObject(filtered, self.vertices, objID, self.textureSetting, self.data, self.filepath)
-            try:
-                cityobj.execute()
-            except RuntimeError as exc:
-                raise RuntimeError(f"Failed to import CityObject '{objID}': {exc}") from exc
+            import copy as _copy
+            for g_idx, geom in enumerate(geoms):
+                filtered = _copy.deepcopy(object)
+                filtered["geometry"] = [geom]
+                geom_lod = geom.get("lod", 0)
+                obj_name = f"{objID}__lod{geom_lod}__g{g_idx}"
+                cityobj = ImportCityObject(filtered, self.vertices, obj_name, self.textureSetting, self.data, self.filepath, source_id=objID, geom_index=g_idx)
+                try:
+                    cityobj.execute()
+                except RuntimeError as exc:
+                    raise RuntimeError(f"Failed to import CityObject '{objID}' geometry {g_idx}: {exc}") from exc
         print('All CityObjects have been created!')
 
     def execute(self):
@@ -210,6 +215,15 @@ class ImportProcess:
         if status is True:
             self.createWorldProperties()                         
         self.createCityObjects()
+        # store baseline CityJSON for delta exports
+        try:
+            from pathlib import Path as _Path
+            baseline_text = _Path(self.filepath).read_text(encoding="utf-8")
+            txt = bpy.data.texts.get("CJE_BASELINE") or bpy.data.texts.new("CJE_BASELINE")
+            txt.clear()
+            txt.write(baseline_text)
+        except Exception as exc:
+            print(f"[CityJSONEditor] Warning: failed to store baseline: {exc}")
 
         print('########################')
         print('### IMPORT FINISHED! ###')

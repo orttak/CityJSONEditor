@@ -79,6 +79,15 @@ If the polygons do not yet have a material you first need to create one yourself
 To export your Object simply go to `File > Export > CityJSON (.json)`.
 Again, make sure to check or uncheck the option for texture export in the export menu acccording to your data. 
 
+### Working with multiple LoDs and semantics (round-tripping)
+
+- Each geometry/LoD is imported as its own Blender object named `{cityobjectid}__lod{lod}__g{index}` and keeps per-face semantics in the `cje_semantic_index` face attribute plus `cj_semantic_surfaces` on the object.
+- Use the object-mode context menu entry **CityJSON Options → set LoD visibility** to show a specific LoD for the active CityObject without deleting the others.
+- Semantics edits: use the face context menu to assign a SurfaceType; the add-on writes the semantic index to `cje_semantic_index` and preserves Door/Window etc. when exporting.
+- Export options include **Patch baseline (preserve unknown keys)** which merges the current scene with the stored baseline CityJSON (captured on import) to keep unknown top-level keys intact, and **Export only changed objects** to replace only dirty/new objects while keeping untouched ones from the baseline.
+- Headless regression:  
+  `blender -b --factory-startup --python tools/roundtrip_blender.py -- --input data/mert_test_lod0-3_openings_cityjson2.0.city.json --output /tmp/out.city.json --report /tmp/report.json`
+
 ## Working with Point Clouds
 
 If you would like to use Point Clouds as a reference for modelling your CityJSON Objects we can recommend another Addon called  `Point Cloud Visualizer` by Jakub Uhlík available on [Blender Market](https://blendermarket.com/products/pcv) (75$). 

@@ -34,6 +34,8 @@ classes = (
     ObjectMenu.VIEW3D_MT_cityobject_construction_submenu,
     ObjectMenu.SetAttributes,
     ObjectMenu.CalculateSemanticsOperator,
+    ObjectMenu.SetActiveLODOperator,
+    ObjectMenu.VIEW3D_MT_cityobject_lod_submenu,
 
 )
 
@@ -53,6 +55,7 @@ def objectmenu_func(self, context):
     layout.operator(ObjectMenu.SetAttributes.bl_idname, text="set initial attributes")
     layout.menu(ObjectMenu.VIEW3D_MT_cityobject_construction_submenu.bl_idname, text="set Construction")
     layout.operator(ObjectMenu.CalculateSemanticsOperator.bl_idname, text="calculate Semantics")
+    layout.menu(ObjectMenu.VIEW3D_MT_cityobject_lod_submenu.bl_idname, text="set LoD visibility")
 
 def editmenu_func(self, context):
     """create context menu in edit mode"""

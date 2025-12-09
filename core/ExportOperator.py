@@ -25,6 +25,16 @@ class ExportCityJSON(Operator, ExportHelper):
         description="Choose if textures present in blender should be exported to the CityJSON file",
         default=True,
     )
+    patch_baseline: BoolProperty(
+        name="Patch baseline (preserve unknown keys)",
+        description="If enabled, merge export into stored baseline CityJSON to keep unknown/unedited fields",
+        default=False,
+    )
+    export_changed_only: BoolProperty(
+        name="Export only changed objects",
+        description="When patching, only replace CityObjects marked dirty or new; keeps others from baseline.",
+        default=False,
+    )
     skip_failed_exports: BoolProperty(
         name="Skip failed objects",
         description="If an object cannot be exported, skip it and continue; otherwise abort export",
@@ -32,5 +42,5 @@ class ExportCityJSON(Operator, ExportHelper):
     )
 
     def execute(self, context):
-        CityJSONExport = ExportProcess(self.filepath, self.texture_setting, self.skip_failed_exports)
+        CityJSONExport = ExportProcess(self.filepath, self.texture_setting, self.skip_failed_exports, self.patch_baseline, self.export_changed_only)
         return CityJSONExport.execute()

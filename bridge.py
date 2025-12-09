@@ -168,7 +168,11 @@ def _validate_with_cjio(path: Path) -> tuple[bool, str]:
         env["PYTHONPATH"] = (
             f"{env.get('PYTHONPATH','')}:{cjio_dir.parent.as_posix()}".strip(":")
         )
-        cmd_prefix = [bpy.app.binary_path_python, "-m", "cjio"]
+        py_bin = getattr(bpy.app, "binary_path_python", None) or getattr(bpy.app, "python_executable", None)
+        if not py_bin:
+            import sys as _sys
+            py_bin = _sys.executable
+        cmd_prefix = [py_bin, "-m", "cjio"]
     elif venv_cjio.exists():
         cmd_prefix = [str(venv_cjio)]
     else:

@@ -31,6 +31,13 @@ class SetSurfaceOperator(bpy.types.Operator):
         if obj.type == 'MESH':
             mesh = obj.data # Assumed that obj.type == 'MESH'
             bpy.context.object.update_from_editmode()
+            attr = mesh.attributes.get("cje_semantic_index")
+            if attr is None:
+                try:
+                    attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+                except Exception:
+                    attr = None
+            surfaces = list(obj.get("cj_semantic_surfaces", []))
             # iterate faces
             for face in mesh.polygons:
                 # get faces that are selected
@@ -48,6 +55,27 @@ class SetSurfaceOperator(bpy.types.Operator):
                     mat.setColor()
                     # assign the new material to the face
                     mat.addMaterialToFace(bpy.context.object.active_material_index, face.index )
+                    # track semantics surface index for export
+                    surface_idx = None
+                    for idx, surf in enumerate(surfaces):
+                        if isinstance(surf, dict) and surf.get("type") == self.surfaceType:
+                            surface_idx = idx
+                            break
+                    if surface_idx is None:
+                        surface_idx = len(surfaces)
+                        surfaces.append({"type": self.surfaceType})
+                    try:
+                        if attr:
+                            attr.data[face.index].value = surface_idx
+                        else:
+                            face["cje_semantic_index"] = surface_idx
+                    except Exception:
+                        try:
+                            face["cje_semantic_index"] = surface_idx
+                        except Exception:
+                            pass
+                    obj["cj_dirty"] = True
+            obj["cj_semantic_surfaces"] = surfaces
         
         # remove the now unused material-slots and delete the data-blocks
         bpy.ops.object.mode_set(mode='OBJECT')
