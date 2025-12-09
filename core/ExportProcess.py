@@ -11,14 +11,16 @@ from .CityObject import ExportCityObject
 
 class ExportProcess:
     """Handles CityJSON export from Blender objects to file."""
-    
-    def __init__(self, filepath, textureSetting):
+
+    def __init__(self, filepath, textureSetting, skip_failed_exports=True):
         self.filepath = filepath
         self.jsonExport = None
         # True - export textures
         # False - do not export textures
         self.textureSetting = textureSetting
         self.textureReferenceList = []
+        self.skip_failed_exports = skip_failed_exports
+        self.skipped_objects = []
 
     def createJSONStruct(self):
         if self.textureSetting: 
@@ -138,8 +140,15 @@ class ExportProcess:
         lastVertexIndex = 0
         for object in blendObjects:
             print("Create Export-Object: "+object.name)
-            cityobj = ExportCityObject(object, lastVertexIndex, self.jsonExport, self.textureSetting, self.textureReferenceList)
-            cityobj.execute()
+            try:
+                cityobj = ExportCityObject(object, lastVertexIndex, self.jsonExport, self.textureSetting, self.textureReferenceList)
+                cityobj.execute()
+            except Exception as exc:
+                if self.skip_failed_exports:
+                    print(f"[CityJSONEditor] Skipping export of '{object.name}': {exc}")
+                    self.skipped_objects.append((object.name, str(exc)))
+                    continue
+                raise
             for vertex in cityobj.vertices:
                 vertex[0] = round(vertex[0]/0.001)
                 vertex[1] = round(vertex[1]/0.001)
@@ -209,6 +218,10 @@ class ExportProcess:
         self.createCityObject()
         self.updateMetadataExtent()
         self.writeData()
+        if self.skipped_objects:
+            print(f"[CityJSONEditor] Export skipped {len(self.skipped_objects)} object(s):")
+            for name, err in self.skipped_objects:
+                print(f" - {name}: {err}")
 
         print('########################')
         print('### EXPORT FINISHED! ###')

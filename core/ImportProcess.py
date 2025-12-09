@@ -12,7 +12,7 @@ from .validation import prepare_cityjson_for_import
 class ImportProcess:
     """Handles reading/preparing CityJSON and instantiating Blender objects."""
 
-    def __init__(self, filepath, textureSetting, lod_filter=""):
+    def __init__(self, filepath, textureSetting, lod_filter="", lod_strategy="ALL"):
         # File to be imported
         self.filepath = filepath
         # Content of imported file
@@ -31,6 +31,7 @@ class ImportProcess:
         self.unScaledVertices = []
         # LoD filter set (floats) if provided
         self.lod_filter = self._parse_lod_filter(lod_filter)
+        self.lod_strategy = lod_strategy
 
     def _parse_lod_filter(self, lod_filter: str):
         vals = set()
@@ -157,10 +158,16 @@ class ImportProcess:
             print('Creating object: '+ objID)
             filtered = object.copy()
             geoms = filtered.get("geometry") or []
-            if self.lod_filter:
-                geoms = [g for g in geoms if float(g.get("lod", 0)) in self.lod_filter]
+            if self.lod_strategy == "HIGHEST" and geoms:
+                max_lod = max(float(g.get("lod", 0.0)) for g in geoms)
+                geoms = [g for g in geoms if float(g.get("lod", 0.0)) == max_lod]
+            elif self.lod_strategy == "FILTER" and self.lod_filter:
+                geoms = [g for g in geoms if float(g.get("lod", 0.0)) in self.lod_filter]
             if not geoms:
-                print(f"Skipping CityObject '{objID}' because no geometry matched LoD filter {sorted(self.lod_filter)}.")
+                msg = "LoD filter skipped"
+                if self.lod_strategy == "HIGHEST":
+                    msg = "No geometry found for highest LoD"
+                print(f"Skipping CityObject '{objID}': {msg}.")
                 continue
             filtered["geometry"] = geoms
             cityobj = ImportCityObject(filtered, self.vertices, objID, self.textureSetting, self.data, self.filepath)

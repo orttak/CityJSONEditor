@@ -77,6 +77,12 @@ class ImportCityObject:
         # create a custom property of the object to save its type and LOD
         newObj['cityJSONType'] = self.objectType
         newObj['LOD'] = self.objectLOD
+        # assign gmlid/identifier/objectid if present in attributes
+        attrs = self.object.get("attributes") or {}
+        gmlid = attrs.get("gmlid") or attrs.get("identifier") or attrs.get("objectid")
+        if gmlid is None:
+            gmlid = self.objectID
+        newObj['gmlid'] = gmlid
         # get the collection with the title "Collection"
         collection = bpy.data.collections.get("Collection")
         # add the new object to the collection

@@ -25,7 +25,12 @@ class ExportCityJSON(Operator, ExportHelper):
         description="Choose if textures present in blender should be exported to the CityJSON file",
         default=True,
     )
+    skip_failed_exports: BoolProperty(
+        name="Skip failed objects",
+        description="If an object cannot be exported, skip it and continue; otherwise abort export",
+        default=True,
+    )
 
     def execute(self, context):
-        CityJSONExport = ExportProcess(self.filepath, self.texture_setting)
+        CityJSONExport = ExportProcess(self.filepath, self.texture_setting, self.skip_failed_exports)
         return CityJSONExport.execute()
