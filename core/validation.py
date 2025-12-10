@@ -125,27 +125,30 @@ def _ensure_texture_keys(data: dict) -> bool:
     return changed
 
 
-def prepare_cityjson_for_import(local_file: Path, allow_textures: bool) -> tuple[bool, str, dict | None]:
+def prepare_cityjson_for_import(
+    local_file: Path, allow_textures: bool, write_back: bool = False
+) -> tuple[bool, str, dict | None, bool]:
     """
     Run structural validation and minimal normalization before importing into Blender.
-    Writes back only when normalization changes were applied.
+    Returns the parsed CityJSON and whether it was modified for import.
+    If write_back is True, the prepared JSON is persisted to disk when changes occurred.
     """
     ok, msg, data = validate_cityjson(local_file)
     if not ok:
-        return False, msg, None
+        return False, msg, None, False
     changed = False
     if _normalize_cityjson_lods(data):
         changed = True
     sem_ok, sem_msg = _check_semantics(data)
     if not sem_ok:
-        return False, sem_msg, None
+        return False, sem_msg, None, False
     if not allow_textures and _strip_textures(data):
         changed = True
     if _ensure_texture_keys(data):
         changed = True
-    if changed:
+    if changed and write_back:
         try:
             local_file.write_text(json.dumps(data), encoding="utf-8")
         except Exception as exc:
-            return False, f"Failed to write prepared CityJSON: {exc}", None
-    return True, "", data
+            return False, f"Failed to write prepared CityJSON: {exc}", None, changed
+    return True, "", data, changed

@@ -25,6 +25,13 @@ class ExportProcess:
         self.export_changed_only = export_changed_only
         self.skipped_objects = []
         self.baseline_data = self._load_baseline()
+        if self.baseline_data is not None:
+            self.keep_transform = "transform" in self.baseline_data
+        else:
+            try:
+                self.keep_transform = bool(bpy.context.scene.get("cj_has_transform", True))
+            except Exception:
+                self.keep_transform = True
 
     def _load_baseline(self):
         txt = bpy.data.texts.get("CJE_BASELINE")
@@ -51,18 +58,17 @@ class ExportProcess:
             "type": "CityJSON",
             "version": version or "2.0",
             "CityObjects": {},
-            "transform": {
-                "scale": [0.001, 0.001, 0.001],
-                "translate": [],
-            },
             "vertices": None,
             "metadata": meta if isinstance(meta, dict) else {},
         }
+        if self.keep_transform:
+            base["transform"] = {
+                "scale": [0.001, 0.001, 0.001],
+                "translate": [],
+            }
         # always start with clean geometry/appearance containers
         base["CityObjects"] = {}
         base["vertices"] = None
-        base.setdefault("transform", {}).setdefault("scale", [0.001, 0.001, 0.001])
-        base["transform"].setdefault("translate", [])
         if self.textureSetting:
             app = base.get("appearance") or {}
             app["textures"] = []
@@ -83,6 +89,9 @@ class ExportProcess:
             self.jsonExport.setdefault("metadata", {}).update({"referenceSystem" : str(crs)})
 
     def getTransform(self):
+        if not self.keep_transform:
+            self.jsonExport.pop("transform", None)
+            return
         try:
             translate = [
                 bpy.context.scene.world['X_Origin'],
@@ -162,10 +171,11 @@ class ExportProcess:
         vertexArray = list(baseline_vertices)
         blendObjects = [obj for obj in bpy.data.objects if getattr(obj, "type", "") == "MESH"]
         lastVertexIndex = len(vertexArray)
-        scale = (self.jsonExport.get("transform") or {}).get("scale") or [0.001, 0.001, 0.001]
+        default_scale = [0.001, 0.001, 0.001] if self.keep_transform else [1, 1, 1]
+        scale = (self.jsonExport.get("transform") or {}).get("scale") or default_scale
         if len(scale) != 3:
-            scale = [0.001, 0.001, 0.001]
-        scale = [s if s not in (None, 0) else 0.001 for s in scale]
+            scale = list(default_scale)
+        scale = [s if s not in (None, 0) else default_scale[idx] for idx, s in enumerate(scale)]
         grouped = copy.deepcopy(baseline_cityobjects) if self.export_changed_only and baseline_cityobjects else {}
 
         objs = []

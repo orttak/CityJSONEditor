@@ -195,7 +195,7 @@ class ImportProcess:
         # clean up unused objects
         bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=False, do_recursive=True)
 
-        ok, msg, data = prepare_cityjson_for_import(Path(self.filepath), self.textureSetting)
+        ok, msg, data, _ = prepare_cityjson_for_import(Path(self.filepath), self.textureSetting)
         if not ok:
             raise RuntimeError(f"CityJSON validation failed: {msg}")
         self.data = data
@@ -208,6 +208,10 @@ class ImportProcess:
             bpy.context.scene["cj_version"] = self.data.get("version", "2.0")
         except Exception:
             bpy.context.scene["cj_version"] = "2.0"
+        try:
+            bpy.context.scene["cj_has_transform"] = bool(self.data.get("transform"))
+        except Exception:
+            bpy.context.scene["cj_has_transform"] = True
         self.getTransformationParameters()
         self.scaleVertexCoordinates()
         status = self.checkImport()

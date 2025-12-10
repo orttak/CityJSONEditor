@@ -35,6 +35,7 @@ class ImportCityObject:
         self.objectType = self.object['type']
         # LOD of the given object
         geom_lod = None
+        geoms = []
         try:
             geoms = self.object.get("geometry") or []
             if geoms:
@@ -43,6 +44,7 @@ class ImportCityObject:
         except Exception:
             geom_lod = None
         self.objectLOD = geom_lod if geom_lod is not None else 0
+        self.has_semantics = any((g.get("semantics") is not None) for g in geoms)
         # entire Data of the file
         self.rawObjectData = rawObjectData
         # File to be imported
@@ -81,6 +83,7 @@ class ImportCityObject:
         # create a custom property of the object to save its type and LOD
         newObj['cityJSONType'] = self.objectType
         newObj['LOD'] = self.objectLOD
+        newObj['cj_has_semantics'] = self.has_semantics
         # assign gmlid/identifier/objectid if present in attributes
         attrs = self.object.get("attributes") or {}
         gmlid = attrs.get("gmlid") or attrs.get("identifier") or attrs.get("objectid")
@@ -137,6 +140,8 @@ class ImportCityObject:
 
 
     def createMaterials(self, newObject):
+        if not self.has_semantics:
+            return
         mesh_data = newObject.data
         try:
             attr = mesh_data.attributes.get("cje_semantic_index")
@@ -272,6 +277,7 @@ class ExportCityObject:
         self.geometry = []
         self.lastVertexIndex = lastVertexIndex
         self.semanticValues = []
+        self.semanticSurfaces = []
         self.scalefactor = 0.001
         self.jsonExport = jsonExport
         self.textureValues = []
@@ -286,6 +292,12 @@ class ExportCityObject:
                 self.source_semantics["surfaces"] = copy.deepcopy(stored_surfaces)
         except Exception:
             self.source_semantics = {"surfaces": []}
+        self.is_dirty = bool(self.object.get("cj_dirty", False))
+        try:
+            self.has_semantics = bool(self.object.get("cj_has_semantics", bool(self.source_semantics.get("surfaces"))))
+        except Exception:
+            self.has_semantics = bool(self.source_semantics.get("surfaces"))
+        self.include_semantics = self.has_semantics or self.is_dirty
         try:
             self.attributes = copy.deepcopy(self.object.get("cj_attributes", {}))
         except Exception:
@@ -369,6 +381,10 @@ class ExportCityObject:
         self.geometry = [geom_entry]
 
     def getSemantics(self):
+        if not self.include_semantics:
+            self.semanticValues = []
+            self.semanticSurfaces = []
+            return
         mesh = bpy.data.meshes[self.objID]
         self.semanticValues = []
         self.semanticSurfaces = [copy.deepcopy(s) for s in (self.source_semantics.get("surfaces") or [])] if isinstance(self.source_semantics, dict) else []
@@ -476,7 +492,7 @@ class ExportCityObject:
             except Exception:
                 pass
         has_semantics = any(v is not None for v in self.semanticValues) or bool(self.semanticSurfaces)
-        if self.objType != 'GenericCityObject' and has_semantics:
+        if self.include_semantics and self.objType != 'GenericCityObject' and has_semantics:
             self.geometry[0].update({"semantics" : {"values" : [self.semanticValues],"surfaces" : self.semanticSurfaces}})
         if self.textureSetting and self.textureValues: 
             self.geometry[0].update({"texture" : {"default" : { "values" : [self.textureValues] }}})
@@ -489,7 +505,7 @@ class ExportCityObject:
         self.getBoundaries()
         if self.objType == 'GenericCityObject':
             pass
-        else: 
+        elif self.include_semantics:
             self.getSemantics()
         self.createJSON()
         return self.export_id, self.json[self.export_id]
