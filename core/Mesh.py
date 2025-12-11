@@ -27,14 +27,19 @@ class Mesh:
             if gtype == 'Solid':
                 for shell in boundaries:
                     for face in shell:
-                        for side in face:
-                            if side:
-                                self.vertexMaps.append(side)
+                        if not face:
+                            continue
+                        # Only use the outer ring; holes are ignored to keep face counts aligned with semantics.
+                        outer = face[0] if isinstance(face[0], list) else face
+                        if outer:
+                            self.vertexMaps.append(outer)
             elif gtype == 'MultiSurface':
                 for face in boundaries:
-                    for ring in face:
-                        if ring:
-                            self.vertexMaps.append(ring)
+                    if not face:
+                        continue
+                    outer = face[0] if isinstance(face[0], list) else face
+                    if outer:
+                        self.vertexMaps.append(outer)
             else:
                 for face in boundaries:
                     if not face:
