@@ -244,10 +244,11 @@ class ImportCityObject:
         bpy.context.view_layer.objects.active = bpy.data.objects[self.objectID]
         # create the objects materials and assign them
         self.createMaterials(newObject)
-        if self.textureSetting == True:
+        geoms = self.object.get('geometry') or []
+        if self.textureSetting == True and geoms:
             try:
                 # UV Mapping of the textures
-                self.uvMapping(newObject, self.rawObjectData, self.object['geometry'][0])
+                self.uvMapping(newObject, self.rawObjectData, geoms[0])
             except:
                 if not getattr(bpy.types.Scene, "cje_warned_uv", False):
                     print("[CityJSONEditor] UV Mapping was not possible for some objects.")
@@ -350,7 +351,11 @@ class ExportCityObject:
 
     def getBoundaries(self):
         # get the mesh by name
-        mesh = bpy.data.meshes[self.objID]
+        mesh = bpy.data.meshes.get(self.objID)
+        if not mesh or not mesh.polygons:
+            self.geometry = []
+            return
+        
         boundaries = []
         # iterate through polygons
         for poly in mesh.polygons:
@@ -373,7 +378,7 @@ class ExportCityObject:
         geom_type = self.geometry_type if self.geometry_type in ("Solid", "MultiSurface") else "Solid"
         geom_entry = {
             "type": geom_type,
-            "lod": self.lod,
+            "lod": str(self.lod),
         }
         if geom_type == "MultiSurface":
             geom_entry["boundaries"] = boundaries

@@ -169,10 +169,14 @@ class ImportProcess:
             elif self.lod_strategy == "FILTER" and self.lod_filter:
                 geoms = [g for g in geoms if float(g.get("lod", 0.0)) in self.lod_filter]
             if not geoms:
-                msg = "LoD filter skipped"
-                if self.lod_strategy == "HIGHEST":
-                    msg = "No geometry found for highest LoD"
-                print(f"Skipping CityObject '{objID}': {msg}.")
+                # User wants to preserve structural/placeholder objects.
+                # Create an object with no LoD geometry.
+                obj_name = f"{objID}__placeholder"
+                cityobj = ImportCityObject(object, self.vertices, obj_name, self.textureSetting, self.data, self.filepath, source_id=objID, geom_index=-1)
+                try:
+                    cityobj.execute()
+                except RuntimeError as exc:
+                    print(f"[CityJSONEditor] Warning: failed to import placeholder '{objID}': {exc}")
                 continue
             import copy as _copy
             for g_idx, geom in enumerate(geoms):

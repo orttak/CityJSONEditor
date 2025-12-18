@@ -53,13 +53,15 @@ class ExportProcess:
             meta = {}
         # Try to get the version from the scene, but upgrade if it's 2.0 or lower
         try:
-            v_raw = str(bpy.context.scene.get("cj_version", "2.0.1"))
+            v_raw = str(bpy.context.scene.get("cj_version", "2.0"))
             if v_raw.startswith("1") or v_raw == "2.0":
-                version = "2.0.1"
+                version = "2.0"
             else:
                 version = v_raw
         except Exception:
-            version = "2.0.1"
+            version = "2.0"
+        if version and float(version) < 2.0:
+            version = "2.0"
         base = {
             "type": "CityJSON",
             "version": version,
@@ -207,7 +209,7 @@ class ExportProcess:
         if len(scale) != 3:
             scale = list(default_scale)
         scale = [s if s not in (None, 0) else default_scale[idx] for idx, s in enumerate(scale)]
-        grouped = copy.deepcopy(baseline_cityobjects) if self.export_changed_only and baseline_cityobjects else {}
+        grouped = copy.deepcopy(baseline_cityobjects) if baseline_cityobjects else {}
 
         objs = self._gather_objects()
 
@@ -240,13 +242,30 @@ class ExportProcess:
                 vertexArray.append(vertex)
             lastVertexIndex = cityobj.lastVertexIndex + 1
             entry = grouped.get(export_id)
-            if entry is None or self.export_changed_only:
+            if entry is None:
                 entry = {"type": base_obj["type"], "attributes": base_obj.get("attributes", {}), "geometry": []}
                 grouped[export_id] = entry
-            elif not entry.get("attributes"):
-                entry["attributes"] = base_obj.get("attributes", {})
-            entry["geometry"].extend(base_obj.get("geometry", []))
+            else:
+                # Update attributes and type from Blender
+                entry["type"] = base_obj["type"]
+                entry.setdefault("attributes", {}).update(base_obj.get("attributes", {}))
+            
+            # Merge geometries: replace existing LoD or append new one
+            new_geoms = base_obj.get("geometry", [])
+            if new_geoms:
+                for n_geo in new_geoms:
+                    n_lod = str(n_geo.get("lod"))
+                    # Find and replace matching LoD in entry
+                    replaced = False
+                    for idx, e_geo in enumerate(entry.get("geometry", [])):
+                        if str(e_geo.get("lod")) == n_lod:
+                            entry["geometry"][idx] = n_geo
+                            replaced = True
+                            break
+                    if not replaced:
+                        entry.setdefault("geometry", []).append(n_geo)
             print("lastVertexIndex "+str(lastVertexIndex))
+        self.jsonExport['version'] = '2.0'
         self.jsonExport['vertices'] = vertexArray
         self.jsonExport['CityObjects'] = grouped
 

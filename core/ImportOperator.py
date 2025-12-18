@@ -31,7 +31,7 @@ class ImportCityJSON(Operator, ImportHelper):
             ("HIGHEST", "Highest", "Import only the highest available LoD per object"),
             ("FILTER", "Filter", "Import only LoDs listed below"),
         ],
-        default="HIGHEST",
+        default="ALL",
     )
     lod_filter: StringProperty(
         name="LoDs",
