@@ -74,6 +74,17 @@ If the polygons do not yet have a material you first need to create one yourself
 
 *We strongly advise you to declare a separate material for every surface as we intended to use this addon for texturing and that capability hinges on having a material for every face.*
 
+#### Manually Adding Windows and Doors
+
+To manually add new openings (Windows/Doors) to an existing wall:
+1.  **Add Geometry**: In *Edit Mode*, add a Plane or a Cube. If using a Cube, delete the hidden faces so you only have the single face representing the opening surface.
+    *   *Tip:* Position the face slightly in front of or exactly co-planar with the wall.
+2.  **Assign Semantics**: Select the new face, right-click to open the CityJSON context menu, and choose `set SurfaceType` → `Window` (or `Door`).
+3.  **Clean Up Geometry (Important!)**:
+    *   If you created zero-thickness geometry or cancelled extrusions, you might have created "degenerate faces" (lines pretending to be faces), which will be invisible in some viewers.
+    *   To fix this: Select All (`A`) → `Mesh` → `Clean Up` → `Merge by Distance`.
+    *   *Note:* You may need to increase the "Merge Distance" in the "Adjust Last Operation" panel (bottom left) to e.g. `0.01`m to ensure vertices snap together correctly.
+
 ### Exporting a 3D city object
 
 To export your Object simply go to `File > Export > CityJSON (.json)`.

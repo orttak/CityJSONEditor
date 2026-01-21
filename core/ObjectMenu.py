@@ -47,6 +47,8 @@ class CalculateSemanticsOperator(bpy.types.Operator):
         # if initial attributes are not already set, do so now
         try: 
             obj = bpy.context.active_object
+            if obj.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
             type = obj['cityJSONType']
                         
         except:
@@ -57,7 +59,7 @@ class CalculateSemanticsOperator(bpy.types.Operator):
             mat = Material(type=surfaceType, newObject=obj, objectID=obj.id_data.name, textureSetting=False, objectType=obj['cityJSONType'], surfaceIndex=None, surfaceValue=None, filepath=None, rawObjectData=None, geometry=None)
             mat.createMaterial()
             mat.setColor()
-            mat.addMaterialToFace(matSlot,faceIndex)
+            mat.assignMaterials(faceIndex, matSlot)
             del mat
 
         def materialCleaner():
@@ -66,14 +68,29 @@ class CalculateSemanticsOperator(bpy.types.Operator):
                 matIndex = face.material_index
                 bpy.context.object.active_material_index = matIndex
                 bpy.ops.object.material_slot_remove()
-            bpy.ops.object.mode_set(mode='EDIT')   
+            # bpy.ops.object.mode_set(mode='EDIT')   
             bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=False, do_recursive=True)
 
         obj = context.object
+        if obj.mode != 'OBJECT':
+             bpy.ops.object.mode_set(mode='OBJECT')
         mesh = obj.data
+        mesh.update()
         attr = mesh.attributes.get("cje_semantic_index")
-        if attr is None:
-            attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+        if attr:
+             mesh.attributes.remove(attr)
+        attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+        
+        # Verify attribute validity
+        if len(attr.data) != len(mesh.polygons):
+             # Try one more update and recreate if needed, otherwise abort to avoid crash
+             mesh.update()
+             if attr: mesh.attributes.remove(attr)
+             attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+             if len(attr.data) != len(mesh.polygons):
+                 self.report({'ERROR'}, f"Mesh attribute mismatch: {len(attr.data)} vs {len(mesh.polygons)}. Try regularizing geometry.")
+                 return {'CANCELLED'}
+
         surfaces = list(obj.get("cj_semantic_surfaces", []))
         materialCleaner()
         matSlot = 0
