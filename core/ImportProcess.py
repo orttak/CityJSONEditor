@@ -6,6 +6,7 @@ Runs validation/prep, sets world transforms, and constructs Blender meshes/objec
 import bpy
 from .CityObject import ImportCityObject, ExportCityObject
 import time
+import sys
 from pathlib import Path
 from .validation import prepare_cityjson_for_import
 
@@ -194,10 +195,13 @@ class ImportProcess:
 
     def execute(self):
         time_start = time.time()
-        try:
-            bpy.ops.wm.console_toggle()
-        except:
-            pass
+        
+        # Console toggle only works on Windows
+        if sys.platform == 'win32':
+            try:
+                bpy.ops.wm.console_toggle()
+            except:
+                pass  # Silently ignore if console toggle fails
         print('##########################')
         print('### STARTING IMPORT... ###')
         print('##########################')
