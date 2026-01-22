@@ -107,9 +107,20 @@ class ImportCityObject:
         newObj["cj_lod"] = self.objectLOD
         newObj["cj_dirty"] = False
         # get the collection with the title "Collection"
-        collection = bpy.data.collections.get("Collection")
-        # add the new object to the collection
-        collection.objects.link(newObj)
+        # Add to LOD-based collection for better organization
+        lod = int(self.objectLOD) if self.objectLOD else 0
+        lod_coll_name = f"LOD_{lod}"
+        
+        # Ensure LOD collection exists
+        if lod_coll_name not in bpy.data.collections:
+            lod_coll = bpy.data.collections.new(lod_coll_name)
+            bpy.context.scene.collection.children.link(lod_coll)
+        else:
+            lod_coll = bpy.data.collections[lod_coll_name]
+        
+        # Link object to LOD collection
+        lod_coll.objects.link(newObj)
+        
         return newObj
 
     def _semantics_for_geometry(self, geom):
