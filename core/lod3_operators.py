@@ -101,6 +101,12 @@ class CITYJSON_OT_place_window_modal(Operator):
         max=1
     )
     
+    has_first_point: bpy.props.BoolProperty(
+        name="Has First Point",
+        description="Whether first point has been set",
+        default=False
+    )
+    
     _draw_handle = None  # GPU draw handler (not a property)
     
     @classmethod
@@ -177,6 +183,10 @@ class CITYJSON_OT_place_window_modal(Operator):
         context.scene.cityjson_editor.active_building = obj
         context.scene.cityjson_editor.active_face_index = face_idx
         
+        # Initialize state
+        self.has_first_point = False
+        self.click_count = 0
+        
         # Setup GPU draw handler for preview
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_preview_callback,
@@ -223,7 +233,13 @@ class CITYJSON_OT_place_window_modal(Operator):
                 self._face_matrix
             )
             if point:
-                self.current_point_local = point
+                # Update current point for preview
+                if self.click_count == 0:
+                    # Before first click - show point indicator
+                    self.current_point_local = point
+                else:
+                    # After first click - dragging rectangle
+                    self.current_point_local = point
         
         # Event: Left mouse button (corner selection)
         elif event.type == 'LEFTMOUSE' and event.value == 'PRESS':
@@ -242,7 +258,8 @@ class CITYJSON_OT_place_window_modal(Operator):
             if self.click_count == 0:
                 # First click: Store corner
                 self.first_point_local = point
-                self.current_point_local = point  # Initialize current
+                self.current_point_local = point
+                self.has_first_point = True
                 self.click_count = 1
                 self.report({'INFO'}, "Click second corner to finish...")
             else:
@@ -560,8 +577,14 @@ class CITYJSON_OT_place_window_modal(Operator):
         # Get context from bpy (callback doesn't receive context parameter in Blender 5.0)
         context = bpy.context
         
+        # Safety checks
+        if not self._face_matrix:
+            return
+        if not self.has_first_point:
+            return
+        
         # Only draw after first click
-        if self.click_count == 0 or not self._face_matrix:
+        if self.click_count == 0:
             return
         
         settings = context.scene.cityjson_editor
