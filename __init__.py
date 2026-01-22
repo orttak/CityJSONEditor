@@ -15,6 +15,7 @@ import bpy
 from .core.ImportOperator import ImportCityJSON
 from .core.ExportOperator import ExportCityJSON
 from .core import EditMenu, ObjectMenu
+from .core import properties, lod3_operators
 from . import bridge
 
 
@@ -36,6 +37,9 @@ classes = (
     ObjectMenu.CalculateSemanticsOperator,
     ObjectMenu.SetActiveLODOperator,
     ObjectMenu.VIEW3D_MT_cityobject_lod_submenu,
+    # 🆕 LOD3 Tools
+    properties.CityJSONEditorSettings,
+    lod3_operators.CITYJSON_OT_place_window_modal,
 
 )
 
@@ -65,6 +69,15 @@ def editmenu_func(self, context):
         layout.separator()
         layout.label(text="CityJSON Options")
         layout.menu(EditMenu.VIEW3D_MT_cityedit_mesh_context_submenu.bl_idname, text="set SurfaceType")
+        
+        # 🆕 LOD3 Tools (only for Building objects)
+        obj = context.active_object
+        if obj and obj.get("cityJSONType") == "Building":
+            layout.separator()
+            layout.label(text="LOD3 Tools")
+            # Use operator_context to force INVOKE_DEFAULT for modal operator
+            layout.operator_context = 'INVOKE_DEFAULT'
+            layout.operator("cityjson.place_window_lod3", text="Place Window (LOD3)", icon='MESH_PLANE')
 
 
 
@@ -73,6 +86,12 @@ def register():
     """Registers the classes and functions of the addon"""
     for cls in classes:
         bpy.utils.register_class(cls)
+    
+    # 🆕 Register PropertyGroup
+    bpy.types.Scene.cityjson_editor = bpy.props.PointerProperty(
+        type=properties.CityJSONEditorSettings
+    )
+    
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
@@ -92,7 +111,11 @@ def unregister():
     bpy.types.VIEW3D_MT_object.remove(objectmenu_func)
     bpy.types.VIEW3D_MT_object_context_menu.remove(objectmenu_func)
     bpy.types.VIEW3D_MT_edit_mesh_context_menu.remove(editmenu_func)
-    for cls in classes:
+    
+    # 🆕 Unregister PropertyGroup
+    del bpy.types.Scene.cityjson_editor
+    
+    for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
 if __name__ == "__main__":

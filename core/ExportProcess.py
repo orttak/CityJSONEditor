@@ -9,6 +9,7 @@ import bpy
 import os
 import shutil
 from .CityObject import ExportCityObject
+from .schema import CJProps, CJExport
 
 class ExportProcess:
     """Handles CityJSON export from Blender objects to file."""
@@ -309,6 +310,12 @@ class ExportProcess:
                     self.skipped_objects.append((object.name, str(exc)))
                     continue
                 raise
+            
+            # 🆕 ADD PARENTS FIELD (LOD3 Window → Building relationship)
+            parent_ids = object.get(CJProps.PARENT_IDS)
+            if parent_ids and isinstance(parent_ids, list) and parent_ids:
+                base_obj[CJExport.PARENTS] = parent_ids
+            
             for vertex in cityobj.vertices:
                 v = list(vertex)
                 v[0] = round(v[0]/scale[0])

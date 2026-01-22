@@ -3,6 +3,26 @@ from .FeatureTypes import FeatureTypes
 from .Material import Material
 import math
 
+
+def id_prop_to_dict(value):
+    """
+    Recursively convert Blender ID properties to plain Python types.
+    """
+    if isinstance(value, dict):
+        return {k: id_prop_to_dict(v) for k, v in value.items()}
+    elif isinstance(value, (list, tuple)):
+        return [id_prop_to_dict(item) for item in value]
+    elif hasattr(value, 'to_dict'):
+        return id_prop_to_dict(value.to_dict())
+    elif hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+        try:
+            return [id_prop_to_dict(item) for item in value]
+        except TypeError:
+            return value
+    else:
+        return value
+
+
 class SetAttributes(bpy.types.Operator):
     bl_idname = "wm.set_attributes"
     bl_label = "SetAttributes"
@@ -43,10 +63,19 @@ class CalculateSemanticsOperator(bpy.types.Operator):
     bl_label = "CalculateSemantics"
 
     def execute(self, context):
+        
+        # Check if an object is selected
+        obj = bpy.context.active_object
+        if obj is None:
+            self.report({'ERROR'}, "No object selected. Select a Building in Object mode.")
+            return {'CANCELLED'}
+        
+        if obj.type != 'MESH':
+            self.report({'ERROR'}, "Selected object is not a mesh.")
+            return {'CANCELLED'}
 
         # if initial attributes are not already set, do so now
         try: 
-            obj = bpy.context.active_object
             if obj.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
             type = obj['cityJSONType']
@@ -76,25 +105,78 @@ class CalculateSemanticsOperator(bpy.types.Operator):
              bpy.ops.object.mode_set(mode='OBJECT')
         mesh = obj.data
         mesh.update()
+        
+        # Get or create semantic attribute - DON'T DELETE existing one!
         attr = mesh.attributes.get("cje_semantic_index")
-        if attr:
-             mesh.attributes.remove(attr)
-        attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+        if attr is None:
+            print("[CityJSONEditor] Creating new semantic attribute...")
+            attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
+        else:
+            print(f"[CityJSONEditor] Using existing semantic attribute (preserving Window/Door faces)")
         
         # Verify attribute validity
         if len(attr.data) != len(mesh.polygons):
-             # Try one more update and recreate if needed, otherwise abort to avoid crash
+             # Size mismatch - need to recreate
+             print(f"[CityJSONEditor] WARNING: Attribute size mismatch - recreating")
              mesh.update()
-             if attr: mesh.attributes.remove(attr)
+             mesh.attributes.remove(attr)
              attr = mesh.attributes.new(name="cje_semantic_index", type='INT', domain='FACE')
              if len(attr.data) != len(mesh.polygons):
                  self.report({'ERROR'}, f"Mesh attribute mismatch: {len(attr.data)} vs {len(mesh.polygons)}. Try regularizing geometry.")
                  return {'CANCELLED'}
 
         surfaces = list(obj.get("cj_semantic_surfaces", []))
+        
+        # Convert to plain dicts (avoid ID property issues)
+        surfaces = id_prop_to_dict(surfaces)
+        
+        print(f"\n[CityJSONEditor] ========== CALCULATE SEMANTIC START ==========")
+        print(f"[CityJSONEditor] Object: {obj.name}")
+        print(f"[CityJSONEditor] Total faces: {len(mesh.polygons)}")
+        print(f"[CityJSONEditor] Total surfaces: {len(surfaces)}")
+        
+        # Preserve existing Window/Door semantics before cleaning materials
+        preserved_semantics = {}
+        old_attr = mesh.attributes.get("cje_semantic_index")
+        
+        print(f"[CityJSONEditor] Semantic attribute exists: {old_attr is not None}")
+        if old_attr:
+            print(f"[CityJSONEditor] Attribute data length: {len(old_attr.data)}")
+            
+        if old_attr:
+            for faceIndex in range(len(mesh.polygons)):
+                try:
+                    old_idx = old_attr.data[faceIndex].value
+                    if old_idx >= 0 and old_idx < len(surfaces):
+                        surf = surfaces[old_idx]
+                        surf_type = surf.get("type", "") if isinstance(surf, dict) else ""
+                        print(f"[CityJSONEditor] Face {faceIndex}: semantic_idx={old_idx}, type={surf_type}")
+                        
+                        if surf_type in ("Window", "Door"):
+                            preserved_semantics[faceIndex] = old_idx
+                            print(f"[CityJSONEditor] ✓ PRESERVING face {faceIndex} as {surf_type}")
+                except Exception as e:
+                    print(f"[CityJSONEditor] WARNING: Cannot read face {faceIndex}: {e}")
+        
+        print(f"[CityJSONEditor] ========================================")
+        print(f"[CityJSONEditor] PRESERVED {len(preserved_semantics)} Window/Door faces")
+        print(f"[CityJSONEditor] Preserved indices: {list(preserved_semantics.keys())}")
+        print(f"[CityJSONEditor] ========================================\n")
+        
         materialCleaner()
         matSlot = 0
         for faceIndex, face in enumerate(obj.data.polygons):
+            # Check if this face was a Window/Door - preserve it
+            if faceIndex in preserved_semantics:
+                old_idx = preserved_semantics[faceIndex]
+                surfaceType = surfaces[old_idx].get("type", "WallSurface")
+                print(f"[CityJSONEditor] Face {faceIndex}: PRESERVED as {surfaceType} (idx={old_idx})")
+                materialCreator(surfaceType, matSlot, faceIndex)
+                attr.data[faceIndex].value = old_idx
+                matSlot += 1
+                continue
+            
+            # Calculate semantic type based on normal
             if math.isclose(face.normal[2] ,-1.0):
                 surfaceType = "GroundSurface"
                 materialCreator(surfaceType,matSlot,faceIndex)
@@ -117,8 +199,16 @@ class CalculateSemanticsOperator(bpy.types.Operator):
                 surface_idx = len(surfaces)
                 surfaces.append({"type": surfaceType})
             attr.data[faceIndex].value = surface_idx
-        obj["cj_semantic_surfaces"] = surfaces
+        
+        # Store as JSON (avoid ID property corruption)
+        surfaces_clean = id_prop_to_dict(surfaces)
+        obj["cj_semantic_surfaces"] = surfaces_clean
         obj["cj_dirty"] = True
+        
+        print(f"\n[CityJSONEditor] ========================================")
+        print(f"[CityJSONEditor] CALCULATE SEMANTIC COMPLETE")
+        print(f"[CityJSONEditor] Total surfaces stored: {len(surfaces_clean)}")
+        print(f"[CityJSONEditor] ==========================================\n")
         
         return {'FINISHED'}
 
